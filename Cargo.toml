@@ -1,0 +1,30 @@
+[package]
+name = "neptune"
+version = "0.1.0"
+edition = "2024"
+description = "Live speech translator for calls: EN speech -> RU subtitles, RU speech -> EN text"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.4", features = ["derive"] }
+dotenvy = "0.15.7"
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "native-tls"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.19"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"] }
+
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+module_name_repetitions = "allow"
+
+[profile.release]
+lto = true
+strip = true
