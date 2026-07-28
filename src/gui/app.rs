@@ -8,6 +8,7 @@ use eframe::egui::{
 };
 use tokio::sync::mpsc;
 
+use crate::config;
 use crate::gui::messages::{StatusSnapshot, UiCommand, UiEvent, estimate_cost_usd};
 
 const MAX_SUBTITLES: usize = 200;
@@ -38,6 +39,15 @@ enum UpdateState {
     Ready(String),
 }
 
+/// Состояние окна настроек.
+#[derive(Default)]
+struct SettingsUi {
+    open: bool,
+    deepgram: String,
+    yandex: String,
+    saved: bool,
+}
+
 /// Состояние окна.
 pub struct NeptuneApp {
     commands: mpsc::UnboundedSender<UiCommand>,
@@ -52,6 +62,7 @@ pub struct NeptuneApp {
     status: StatusSnapshot,
     last_error: Option<String>,
     update: UpdateState,
+    settings: SettingsUi,
 }
 
 impl NeptuneApp {
@@ -75,6 +86,7 @@ impl NeptuneApp {
             status: StatusSnapshot::default(),
             last_error: None,
             update: UpdateState::Idle,
+            settings: SettingsUi::default(),
         }
     }
 
@@ -166,11 +178,89 @@ impl NeptuneApp {
         let _ = self.commands.send(command);
     }
 
+    /// Плавающее окно настроек: ввод ключей API с сохранением в `%APPDATA%`.
+    fn settings_window(&mut self, ctx: &egui::Context) {
+        if !self.settings.open {
+            return;
+        }
+        let mut open = true;
+        egui::Window::new("Настройки")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.label(RichText::new("Ключи API").strong());
+                ui.horizontal(|ui| {
+                    ui.label("Deepgram");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.settings.deepgram)
+                            .password(true)
+                            .desired_width(250.0),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Yandex   ");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.settings.yandex)
+                            .password(true)
+                            .desired_width(250.0),
+                    );
+                });
+                if let Some(path) = config::appdata_env_path() {
+                    ui.label(
+                        RichText::new(format!("Хранятся в {}", path.display()))
+                            .weak()
+                            .small(),
+                    );
+                }
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Сохранить").clicked() {
+                        match config::save_keys(&self.settings.deepgram, &self.settings.yandex) {
+                            Ok(_) => {
+                                self.settings.saved = true;
+                                self.last_error = None;
+                            }
+                            Err(error) => {
+                                self.last_error = Some(format!("настройки: {error}"));
+                            }
+                        }
+                    }
+                    if self.settings.saved {
+                        ui.label(RichText::new("Сохранено").small());
+                        if ui.small_button("🔄 перезапустить").clicked() {
+                            restart_app(ctx);
+                        }
+                    }
+                });
+                if self.settings.saved {
+                    ui.label(
+                        RichText::new("Ключи подхватятся после перезапуска")
+                            .weak()
+                            .small(),
+                    );
+                }
+            });
+        self.settings.open = open;
+    }
+
     fn header(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Neptune").strong());
             ui.label(RichText::new("EN ⇄ RU").weak());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui
+                    .selectable_label(self.settings.open, "⚙")
+                    .on_hover_text("Настройки (ключи API)")
+                    .clicked()
+                {
+                    self.settings.open = !self.settings.open;
+                    if self.settings.open {
+                        self.settings.deepgram = config::deepgram_api_key().unwrap_or_default();
+                        self.settings.yandex = config::yandex_api_key().unwrap_or_default();
+                        self.settings.saved = false;
+                    }
+                }
                 if ui
                     .selectable_label(self.pinned, "📌")
                     .on_hover_text("Поверх всех окон")
@@ -388,5 +478,6 @@ impl eframe::App for NeptuneApp {
         CentralPanel::default_margins().show(ui, |ui| {
             self.subtitles_panel(ui);
         });
+        self.settings_window(&ctx);
     }
 }

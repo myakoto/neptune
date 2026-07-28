@@ -47,14 +47,14 @@ impl EventSender {
 /// Главный цикл воркера: обрабатывает команды окна.
 pub async fn run(mut commands: mpsc::UnboundedReceiver<UiCommand>, events: EventSender) {
     let Ok(api_key) = config::deepgram_api_key() else {
-        events.error("DEEPGRAM_API_KEY не задан — добавь его в .env и перезапусти");
+        events.error("Нет ключа Deepgram — открой ⚙ настройки, вставь ключ и перезапусти");
         return;
     };
     let translator = config::yandex_api_key()
         .ok()
         .map(|key| Arc::new(YandexTranslator::new(key)));
     if translator.is_none() {
-        events.error("YANDEX_API_KEY не задан — субтитры без перевода");
+        events.error("Нет ключа Yandex — распознавание без перевода (⚙ настройки)");
     }
     let stats = SessionStats::new(translator.is_some());
 
