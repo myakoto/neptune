@@ -3,11 +3,30 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
+use crate::audio::CaptureSource;
 use crate::config;
 use crate::stt::DeepgramClient;
 use crate::translate::YandexTranslator;
+
+/// Источник звука для команды `listen`.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum SourceArg {
+    /// Микрофон (моя речь)
+    Mic,
+    /// Звук системы — то, что играет в наушниках (речь собеседников)
+    Loopback,
+}
+
+impl From<SourceArg> for CaptureSource {
+    fn from(source: SourceArg) -> Self {
+        match source {
+            SourceArg::Mic => Self::Mic,
+            SourceArg::Loopback => Self::Loopback,
+        }
+    }
+}
 
 /// Живой переводчик речи для созвонов (EN ⇄ RU).
 #[derive(Parser)]
@@ -38,6 +57,18 @@ enum Command {
         #[arg(long)]
         language: Option<String>,
     },
+    /// Живое распознавание речи (Ctrl+C — стоп)
+    Listen {
+        /// Язык речи ("en", "ru" или "multi" для смешанной)
+        #[arg(long, default_value = "en")]
+        language: String,
+        /// Источник звука: микрофон или loopback (звук созвона)
+        #[arg(long, value_enum, default_value_t = SourceArg::Mic)]
+        source: SourceArg,
+        /// Прогнать WAV-файл вместо живого источника (отладка пайплайна)
+        #[arg(long)]
+        wav: Option<PathBuf>,
+    },
 }
 
 /// Выполняет команду, выбранную пользователем.
@@ -57,6 +88,13 @@ pub async fn run(args: Args) -> Result<()> {
                 .with_context(|| format!("не удалось прочитать файл {}", path.display()))?;
             let transcript = client.transcribe_wav(wav, language.as_deref()).await?;
             println!("[{}] {}", transcript.language, transcript.text);
+        }
+        Command::Listen {
+            language,
+            source,
+            wav,
+        } => {
+            crate::listen::run(language, source.into(), wav).await?;
         }
     }
     Ok(())
@@ -82,7 +120,7 @@ mod tests {
                 assert_eq!(from, "ru");
                 assert_eq!(to, "en");
             }
-            Command::Transcribe { .. } => panic!("ожидалась команда translate"),
+            _ => panic!("ожидалась команда translate"),
         }
     }
 }

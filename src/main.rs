@@ -3,8 +3,10 @@
 //! Точка входа: подхватывает `.env`, разбирает аргументы и передаёт
 //! управление в [`cli::run`].
 
+mod audio;
 mod cli;
 mod config;
+mod listen;
 mod stt;
 mod translate;
 
