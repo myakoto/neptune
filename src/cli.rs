@@ -73,6 +73,8 @@ pub enum Command {
         #[arg(long)]
         wav: Option<PathBuf>,
     },
+    /// Проверить обновления и установить свежий релиз
+    Update,
 }
 
 /// Выполняет CLI-команду (GUI обрабатывается в `main` до этого вызова).
@@ -100,6 +102,17 @@ pub async fn run_command(command: Command) -> Result<()> {
             wav,
         } => {
             crate::listen::run(language, source.into(), wav).await?;
+        }
+        Command::Update => {
+            println!("Текущая версия: {}", env!("CARGO_PKG_VERSION"));
+            match tokio::task::spawn_blocking(crate::update::check).await?? {
+                Some(version) => {
+                    println!("Найдена версия {version}, скачиваю…");
+                    let installed = tokio::task::spawn_blocking(crate::update::apply).await??;
+                    println!("Обновлено до {installed}. Перезапусти приложение.");
+                }
+                None => println!("Обновлений нет — стоит последняя версия."),
+            }
         }
     }
     Ok(())

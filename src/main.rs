@@ -11,6 +11,7 @@ mod gui;
 mod listen;
 mod stt;
 mod translate;
+mod update;
 
 use anyhow::Result;
 use clap::Parser;

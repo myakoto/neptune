@@ -58,6 +58,8 @@ pub async fn run(mut commands: mpsc::UnboundedReceiver<UiCommand>, events: Event
     }
     let stats = SessionStats::new(translator.is_some());
 
+    tokio::spawn(check_update_task(events.clone()));
+
     let mut subtitles: Option<JoinHandle<()>> = None;
     let mut ptt_stop: Option<oneshot::Sender<()>> = None;
 
@@ -100,7 +102,29 @@ pub async fn run(mut commands: mpsc::UnboundedReceiver<UiCommand>, events: Event
                     let _ = stop.send(());
                 }
             }
+            UiCommand::ApplyUpdate => {
+                tokio::spawn(apply_update_task(events.clone()));
+            }
         }
+    }
+}
+
+/// Разовая проверка обновлений при старте (blocking-код — в отдельном треде).
+async fn check_update_task(events: EventSender) {
+    match tokio::task::spawn_blocking(crate::update::check).await {
+        Ok(Ok(Some(version))) => events.send(UiEvent::UpdateAvailable(version)),
+        Ok(Ok(None)) => {}
+        Ok(Err(error)) => events.error(format!("проверка обновлений: {error}")),
+        Err(_) => events.error("проверка обновлений прервалась"),
+    }
+}
+
+/// Скачивание и установка обновления по запросу из окна.
+async fn apply_update_task(events: EventSender) {
+    match tokio::task::spawn_blocking(crate::update::apply).await {
+        Ok(Ok(version)) => events.send(UiEvent::UpdateApplied(version)),
+        Ok(Err(error)) => events.send(UiEvent::UpdateFailed(error.to_string())),
+        Err(_) => events.send(UiEvent::UpdateFailed("обновление прервалось".into())),
     }
 }
 

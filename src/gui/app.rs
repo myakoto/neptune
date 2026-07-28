@@ -26,6 +26,18 @@ struct PttEntry {
     translated: Option<String>,
 }
 
+/// Состояние автообновления.
+enum UpdateState {
+    /// Обновлений нет (или ещё не проверяли).
+    Idle,
+    /// Найдена новая версия.
+    Available(String),
+    /// Идёт скачивание и установка.
+    Downloading,
+    /// Установлено, ждём перезапуска.
+    Ready(String),
+}
+
 /// Состояние окна.
 pub struct NeptuneApp {
     commands: mpsc::UnboundedSender<UiCommand>,
@@ -39,6 +51,7 @@ pub struct NeptuneApp {
     history: VecDeque<PttEntry>,
     status: StatusSnapshot,
     last_error: Option<String>,
+    update: UpdateState,
 }
 
 impl NeptuneApp {
@@ -61,6 +74,7 @@ impl NeptuneApp {
             history: VecDeque::new(),
             status: StatusSnapshot::default(),
             last_error: None,
+            update: UpdateState::Idle,
         }
     }
 
@@ -104,7 +118,47 @@ impl NeptuneApp {
                 }
                 UiEvent::Status(snapshot) => self.status = snapshot,
                 UiEvent::Error(message) => self.last_error = Some(message),
+                UiEvent::UpdateAvailable(version) => {
+                    self.update = UpdateState::Available(version);
+                }
+                UiEvent::UpdateApplied(version) => self.update = UpdateState::Ready(version),
+                UiEvent::UpdateFailed(message) => {
+                    self.update = UpdateState::Idle;
+                    self.last_error = Some(format!("обновление: {message}"));
+                }
             }
+        }
+    }
+
+    /// Баннер обновления; рисуется только когда есть что показать.
+    fn update_banner(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        let mut start_download = false;
+        match &self.update {
+            UpdateState::Idle => {}
+            UpdateState::Available(version) => {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("Доступна версия {version}")).small());
+                    start_download = ui.small_button("⬇ обновить").clicked();
+                });
+            }
+            UpdateState::Downloading => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(RichText::new("Скачиваю обновление…").small());
+                });
+            }
+            UpdateState::Ready(version) => {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("Версия {version} установлена")).small());
+                    if ui.small_button("🔄 перезапустить").clicked() {
+                        restart_app(ctx);
+                    }
+                });
+            }
+        }
+        if start_download {
+            self.send(UiCommand::ApplyUpdate);
+            self.update = UpdateState::Downloading;
         }
     }
 
@@ -303,6 +357,14 @@ fn copy_to_clipboard(text: &str) {
     }
 }
 
+/// Запускает свежий exe (по тому же пути) и закрывает текущее окно.
+fn restart_app(ctx: &egui::Context) {
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = std::process::Command::new(exe).spawn();
+    }
+    ctx.send_viewport_cmd(ViewportCommand::Close);
+}
+
 impl eframe::App for NeptuneApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.drain_events();
@@ -311,6 +373,11 @@ impl eframe::App for NeptuneApp {
         Panel::top("header").show(ui, |ui| {
             self.header(&ctx, ui);
         });
+        if !matches!(self.update, UpdateState::Idle) {
+            Panel::top("update").show(ui, |ui| {
+                self.update_banner(&ctx, ui);
+            });
+        }
         Panel::bottom("status").show(ui, |ui| {
             self.status_bar(ui);
         });

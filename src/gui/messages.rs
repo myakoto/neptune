@@ -18,6 +18,8 @@ pub enum UiCommand {
     PttPress,
     /// Закончить запись и получить перевод.
     PttRelease,
+    /// Скачать и установить доступное обновление.
+    ApplyUpdate,
 }
 
 /// События воркера для окна.
@@ -51,6 +53,12 @@ pub enum UiEvent {
     Status(StatusSnapshot),
     /// Ошибка для показа в статусе.
     Error(String),
+    /// На GitHub есть релиз новее текущей версии.
+    UpdateAvailable(String),
+    /// Обновление скачано и установлено, нужен перезапуск.
+    UpdateApplied(String),
+    /// Обновление не удалось.
+    UpdateFailed(String),
 }
 
 /// Снимок счётчиков для статус-строки.

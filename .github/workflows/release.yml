@@ -1,0 +1,42 @@
+# Релиз по тегу vX.Y.Z: собирает exe, пакует в zip и публикует
+# GitHub Release. Теги с дефисом (v0.2.0-beta.1) помечаются prerelease —
+# автообновление в приложении их пропускает, беты ставятся вручную.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Тег должен совпадать с версией в Cargo.toml
+        shell: pwsh
+        run: |
+          $cargo = (Select-String '^version = "(.+)"' Cargo.toml).Matches[0].Groups[1].Value
+          $tag = "${{ github.ref_name }}"
+          if ("v$cargo" -ne $tag) {
+            Write-Error "Тег $tag не совпадает с версией Cargo.toml v$cargo. Подними version и пересоздай тег."
+          }
+
+      - name: Сборка release
+        run: cargo build --release
+
+      - name: Упаковка артефакта
+        shell: pwsh
+        run: Compress-Archive -Path target/release/neptune.exe -DestinationPath neptune-x86_64-pc-windows-msvc.zip
+
+      - name: Публикация GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: neptune-x86_64-pc-windows-msvc.zip
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
