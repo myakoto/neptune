@@ -12,7 +12,7 @@ use crate::translate::YandexTranslator;
 
 /// Источник звука для команды `listen`.
 #[derive(Clone, Copy, Debug, ValueEnum)]
-enum SourceArg {
+pub enum SourceArg {
     /// Микрофон (моя речь)
     Mic,
     /// Звук системы — то, что играет в наушниках (речь собеседников)
@@ -32,12 +32,16 @@ impl From<SourceArg> for CaptureSource {
 #[derive(Parser)]
 #[command(name = "neptune", version, about)]
 pub struct Args {
+    /// Команда; без неё открывается GUI-окно.
     #[command(subcommand)]
-    command: Command,
+    pub command: Option<Command>,
 }
 
+/// Команды приложения.
 #[derive(Subcommand)]
-enum Command {
+pub enum Command {
+    /// Открыть GUI-окно (режим по умолчанию)
+    Gui,
     /// Перевести текст (по умолчанию с русского на английский)
     Translate {
         /// Текст для перевода
@@ -71,12 +75,13 @@ enum Command {
     },
 }
 
-/// Выполняет команду, выбранную пользователем.
+/// Выполняет CLI-команду (GUI обрабатывается в `main` до этого вызова).
 ///
 /// # Errors
 /// Возвращает ошибку конфигурации, сети или API соответствующего сервиса.
-pub async fn run(args: Args) -> Result<()> {
-    match args.command {
+pub async fn run_command(command: Command) -> Result<()> {
+    match command {
+        Command::Gui => unreachable!("gui запускается из main без tokio-рантайма"),
         Command::Translate { text, from, to } => {
             let translator = YandexTranslator::new(config::yandex_api_key()?);
             let translated = translator.translate(&text, &from, &to).await?;
@@ -115,12 +120,18 @@ mod tests {
     fn translate_defaults_to_ru_en() {
         let args = Args::parse_from(["neptune", "translate", "привет"]);
         match args.command {
-            Command::Translate { text, from, to } => {
+            Some(Command::Translate { text, from, to }) => {
                 assert_eq!(text, "привет");
                 assert_eq!(from, "ru");
                 assert_eq!(to, "en");
             }
             _ => panic!("ожидалась команда translate"),
         }
+    }
+
+    #[test]
+    fn no_command_means_gui() {
+        let args = Args::parse_from(["neptune"]);
+        assert!(args.command.is_none());
     }
 }
