@@ -27,11 +27,14 @@ struct PttEntry {
     translated: Option<String>,
 }
 
-/// Состояние автообновления.
+/// Состояние автообновления. Пайплайн стартует только после того,
+/// как проверка завершилась (успехом, отказом или выбором «остаться»).
 enum UpdateState {
-    /// Обновлений нет (или ещё не проверяли).
+    /// Идёт стартовая проверка (до 15 секунд).
+    Checking,
+    /// Проверка завершена, вопрос закрыт.
     Idle,
-    /// Найдена новая версия.
+    /// Найдена новая версия — ждём выбора пользователя.
     Available(String),
     /// Идёт скачивание и установка.
     Downloading,
@@ -66,13 +69,12 @@ pub struct NeptuneApp {
 }
 
 impl NeptuneApp {
-    /// Создаёт окно и сразу включает субтитры.
+    /// Создаёт окно; субтитры включатся после проверки обновлений.
     #[must_use]
     pub fn new(
         commands: mpsc::UnboundedSender<UiCommand>,
         events: mpsc::UnboundedReceiver<UiEvent>,
     ) -> Self {
-        let _ = commands.send(UiCommand::SetListening(true));
         Self {
             commands,
             events,
@@ -85,9 +87,15 @@ impl NeptuneApp {
             history: VecDeque::new(),
             status: StatusSnapshot::default(),
             last_error: None,
-            update: UpdateState::Idle,
+            update: UpdateState::Checking,
             settings: SettingsUi::default(),
         }
+    }
+
+    /// Закрывает вопрос обновления и запускает основной пайплайн.
+    fn finish_update_check(&mut self) {
+        self.update = UpdateState::Idle;
+        self.send(UiCommand::SetListening(true));
     }
 
     fn drain_events(&mut self) {
@@ -133,10 +141,15 @@ impl NeptuneApp {
                 UiEvent::UpdateAvailable(version) => {
                     self.update = UpdateState::Available(version);
                 }
+                UiEvent::UpdateUpToDate => self.finish_update_check(),
+                UiEvent::UpdateCheckFailed(message) => {
+                    self.last_error = Some(format!("Не смогли проверить обновления: {message}"));
+                    self.finish_update_check();
+                }
                 UiEvent::UpdateApplied(version) => self.update = UpdateState::Ready(version),
                 UiEvent::UpdateFailed(message) => {
-                    self.update = UpdateState::Idle;
                     self.last_error = Some(format!("обновление: {message}"));
+                    self.finish_update_check();
                 }
             }
         }
@@ -145,12 +158,20 @@ impl NeptuneApp {
     /// Баннер обновления; рисуется только когда есть что показать.
     fn update_banner(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         let mut start_download = false;
+        let mut stay_on_current = false;
         match &self.update {
             UpdateState::Idle => {}
+            UpdateState::Checking => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(RichText::new("Проверяю обновления…").small());
+                });
+            }
             UpdateState::Available(version) => {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(format!("Доступна версия {version}")).small());
-                    start_download = ui.small_button("⬇ обновить").clicked();
+                    start_download = ui.small_button("⬇ обновиться").clicked();
+                    stay_on_current = ui.small_button("остаться на текущей").clicked();
                 });
             }
             UpdateState::Downloading => {
@@ -171,6 +192,9 @@ impl NeptuneApp {
         if start_download {
             self.send(UiCommand::ApplyUpdate);
             self.update = UpdateState::Downloading;
+        }
+        if stay_on_current {
+            self.finish_update_check();
         }
     }
 

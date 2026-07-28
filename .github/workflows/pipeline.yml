@@ -1,0 +1,75 @@
+# Единый конвейер: проверки на каждый пуш/PR, релиз — автоматически,
+# когда в master приезжает новая версия в Cargo.toml.
+#
+# Тег vX.Y.Z создаёт сам workflow (softprops/action-gh-release), руками
+# теги не ставим — поэтому «тег ≠ версия» невозможен, а пуш порождает
+# ровно один прогон. Версия с дефисом (0.2.0-beta.1) публикуется
+# как prerelease — автообновление её пропускает.
+name: pipeline
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: rustfmt
+        run: cargo fmt --check
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: tests
+        run: cargo test
+
+  # Быстрая задача: смотрит, есть ли уже тег для версии из Cargo.toml.
+  version:
+    needs: checks
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      value: ${{ steps.parse.outputs.value }}
+      new: ${{ steps.parse.outputs.new }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: parse
+        shell: bash
+        run: |
+          v=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          echo "value=$v" >> "$GITHUB_OUTPUT"
+          # ls-remote не зависит от поверхностного клона checkout'а
+          if git ls-remote --exit-code --tags origin "refs/tags/v$v" >/dev/null 2>&1; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "версия $v, релиз нужен: $(git ls-remote --exit-code --tags origin "refs/tags/v$v" >/dev/null 2>&1 && echo нет || echo да)"
+
+  release:
+    needs: version
+    if: needs.version.outputs.new == 'true'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Сборка release
+        run: cargo build --release
+      - name: Упаковка артефакта
+        shell: pwsh
+        run: Compress-Archive -Path target/release/neptune.exe -DestinationPath neptune-x86_64-pc-windows-msvc.zip
+      - name: Тег и GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.version.outputs.value }}
+          files: neptune-x86_64-pc-windows-msvc.zip
+          prerelease: ${{ contains(needs.version.outputs.value, '-') }}
+          generate_release_notes: true

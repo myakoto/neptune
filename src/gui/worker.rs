@@ -19,6 +19,7 @@ use crate::translate::YandexTranslator;
 const KEEPALIVE_PERIOD: Duration = Duration::from_secs(5);
 const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 const PTT_DRAIN_TIMEOUT: Duration = Duration::from_secs(3);
+const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Отправитель событий в окно: каждое событие будит перерисовку.
 #[derive(Clone)]
@@ -45,20 +46,22 @@ impl EventSender {
 }
 
 /// Главный цикл воркера: обрабатывает команды окна.
+///
+/// Проверка обновлений уходит в фон самым первым действием — до любых
+/// проверок ключей, чтобы обновление работало и на пустой машине.
 pub async fn run(mut commands: mpsc::UnboundedReceiver<UiCommand>, events: EventSender) {
-    let Ok(api_key) = config::deepgram_api_key() else {
-        events.error("Нет ключа Deepgram — открой ⚙ настройки, вставь ключ и перезапусти");
-        return;
-    };
+    tokio::spawn(check_update_task(events.clone()));
+
+    let api_key = config::deepgram_api_key().ok();
     let translator = config::yandex_api_key()
         .ok()
         .map(|key| Arc::new(YandexTranslator::new(key)));
-    if translator.is_none() {
+    if api_key.is_none() {
+        events.error("Нет ключа Deepgram — открой ⚙ настройки, вставь ключ и перезапусти");
+    } else if translator.is_none() {
         events.error("Нет ключа Yandex — распознавание без перевода (⚙ настройки)");
     }
     let stats = SessionStats::new(translator.is_some());
-
-    tokio::spawn(check_update_task(events.clone()));
 
     let mut subtitles: Option<JoinHandle<()>> = None;
     let mut ptt_stop: Option<oneshot::Sender<()>> = None;
@@ -66,6 +69,11 @@ pub async fn run(mut commands: mpsc::UnboundedReceiver<UiCommand>, events: Event
     while let Some(command) = commands.recv().await {
         match command {
             UiCommand::SetListening(true) => {
+                let Some(api_key) = &api_key else {
+                    events.send(UiEvent::Listening(false));
+                    events.error("Нет ключа Deepgram — открой ⚙ настройки");
+                    continue;
+                };
                 if subtitles.is_none() {
                     subtitles = Some(tokio::spawn(subtitle_task(
                         api_key.clone(),
@@ -85,6 +93,10 @@ pub async fn run(mut commands: mpsc::UnboundedReceiver<UiCommand>, events: Event
                 events.send(UiEvent::Status(stats.snapshot()));
             }
             UiCommand::PttPress => {
+                let Some(api_key) = &api_key else {
+                    events.error("Нет ключа Deepgram — открой ⚙ настройки");
+                    continue;
+                };
                 if ptt_stop.is_none() {
                     let (stop_tx, stop_rx) = oneshot::channel();
                     ptt_stop = Some(stop_tx);
@@ -109,13 +121,20 @@ pub async fn run(mut commands: mpsc::UnboundedReceiver<UiCommand>, events: Event
     }
 }
 
-/// Разовая проверка обновлений при старте (blocking-код — в отдельном треде).
+/// Стартовая проверка обновлений: не дольше 15 секунд, любой сбой —
+/// не помеха запуску (blocking-код — в отдельном треде).
 async fn check_update_task(events: EventSender) {
-    match tokio::task::spawn_blocking(crate::update::check).await {
-        Ok(Ok(Some(version))) => events.send(UiEvent::UpdateAvailable(version)),
-        Ok(Ok(None)) => {}
-        Ok(Err(error)) => events.error(format!("проверка обновлений: {error}")),
-        Err(_) => events.error("проверка обновлений прервалась"),
+    let check = tokio::task::spawn_blocking(crate::update::check);
+    match tokio::time::timeout(UPDATE_CHECK_TIMEOUT, check).await {
+        Ok(Ok(Ok(Some(version)))) => events.send(UiEvent::UpdateAvailable(version)),
+        Ok(Ok(Ok(None))) => events.send(UiEvent::UpdateUpToDate),
+        Ok(Ok(Err(error))) => events.send(UiEvent::UpdateCheckFailed(error.to_string())),
+        Ok(Err(_)) => events.send(UiEvent::UpdateCheckFailed("проверка прервалась".into())),
+        Err(_) => {
+            events.send(UiEvent::UpdateCheckFailed(
+                "GitHub не ответил за 15 секунд".into(),
+            ));
+        }
     }
 }
 

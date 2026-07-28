@@ -55,6 +55,10 @@ pub enum UiEvent {
     Error(String),
     /// На GitHub есть релиз новее текущей версии.
     UpdateAvailable(String),
+    /// Проверка прошла: стоит последняя версия, можно запускаться.
+    UpdateUpToDate,
+    /// Проверить не удалось (GitHub недоступен) — запускаемся как есть.
+    UpdateCheckFailed(String),
     /// Обновление скачано и установлено, нужен перезапуск.
     UpdateApplied(String),
     /// Обновление не удалось.
