@@ -109,7 +109,7 @@ pub async fn run_command(command: Command) -> Result<()> {
                 Some(version) => {
                     println!("Найдена версия {version}, скачиваю…");
                     let installed = tokio::task::spawn_blocking(crate::update::apply).await??;
-                    println!("Обновлено до {installed}. Перезапусти приложение.");
+                    println!("Обновлено до {installed}. Файл заменён — перезапусти приложение.");
                 }
                 None => println!("Обновлений нет — стоит последняя версия."),
             }

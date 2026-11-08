@@ -66,6 +66,10 @@ pub struct NeptuneApp {
     last_error: Option<String>,
     update: UpdateState,
     settings: SettingsUi,
+    /// Слушать начинаем только после первой (стартовой) проверки обновлений.
+    start_listening_after_check: bool,
+    /// Обновление установлено — нужно перезапустить приложение.
+    restart_pending: bool,
 }
 
 impl NeptuneApp {
@@ -89,13 +93,18 @@ impl NeptuneApp {
             last_error: None,
             update: UpdateState::Checking,
             settings: SettingsUi::default(),
+            start_listening_after_check: true,
+            restart_pending: false,
         }
     }
 
     /// Закрывает вопрос обновления и запускает основной пайплайн.
     fn finish_update_check(&mut self) {
         self.update = UpdateState::Idle;
-        self.send(UiCommand::SetListening(true));
+        if self.start_listening_after_check {
+            self.start_listening_after_check = false;
+            self.send(UiCommand::SetListening(true));
+        }
     }
 
     fn drain_events(&mut self) {
@@ -146,7 +155,10 @@ impl NeptuneApp {
                     self.last_error = Some(format!("Не смогли проверить обновления: {message}"));
                     self.finish_update_check();
                 }
-                UiEvent::UpdateApplied(version) => self.update = UpdateState::Ready(version),
+                UiEvent::UpdateApplied(version) => {
+                    self.update = UpdateState::Ready(version);
+                    self.restart_pending = true;
+                }
                 UiEvent::UpdateFailed(message) => {
                     self.last_error = Some(format!("обновление: {message}"));
                     self.finish_update_check();
@@ -182,8 +194,8 @@ impl NeptuneApp {
             }
             UpdateState::Ready(version) => {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("Версия {version} установлена")).small());
-                    if ui.small_button("🔄 перезапустить").clicked() {
+                    ui.label(RichText::new(format!("Версия {version} установлена, перезапускаю…")).small());
+                    if ui.small_button("🔄 перезапустить сейчас").clicked() {
                         restart_app(ctx);
                     }
                 });
@@ -273,6 +285,14 @@ impl NeptuneApp {
             ui.label(RichText::new("Neptune").strong());
             ui.label(RichText::new("EN ⇄ RU").weak());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui
+                    .selectable_label(false, "🔄")
+                    .on_hover_text("Проверить обновления")
+                    .clicked()
+                {
+                    self.update = UpdateState::Checking;
+                    self.send(UiCommand::CheckUpdate);
+                }
                 if ui
                     .selectable_label(self.settings.open, "⚙")
                     .on_hover_text("Настройки (ключи API)")
@@ -483,6 +503,12 @@ impl eframe::App for NeptuneApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.drain_events();
         let ctx = ui.ctx().clone();
+
+        if self.restart_pending {
+            self.restart_pending = false;
+            restart_app(&ctx);
+            return;
+        }
 
         Panel::top("header").show(ui, |ui| {
             self.header(&ctx, ui);
