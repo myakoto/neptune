@@ -5,11 +5,11 @@
 //! `.exe.sha256`. Проверка идёт через GitHub REST API, скачивание —
 //! напрямую с github.com, контрольная сумма сверяется до подмены.
 //!
-//! Подмена бинарника — self_replace: на Windows текущий exe переименовывается,
+//! Подмена бинарника — `self_replace`: на Windows текущий exe переименовывается,
 //! новый копируется на его место, а переименованный старый удаляется при выходе
 //! из процесса. Пользователю ничего скачивать руками не нужно.
 
-use std::fs;
+use std::fmt::Write as _;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -22,7 +22,6 @@ use sha2::{Digest, Sha256};
 
 const REPO_OWNER: &str = "myakoto";
 const REPO_NAME: &str = "neptune";
-const API_LATEST: &str = "https://api.github.com/repos/myakoto/neptune/releases/latest";
 /// Бинарник в релизе — то, что качает апдейтер.
 const ASSET_EXE: &str = "neptune-x86_64-pc-windows-msvc.exe";
 /// Контрольная сумма бинарника из того же релиза.
@@ -68,6 +67,11 @@ fn client() -> Result<Client> {
         .context("не удалось создать HTTP-клиент")
 }
 
+/// Адрес последнего стабильного релиза.
+fn api_latest() -> String {
+    format!("https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/releases/latest")
+}
+
 /// Разбирает ответ GitHub и достаёт ссылки на бинарник и контрольную сумму.
 ///
 /// # Errors
@@ -99,7 +103,7 @@ fn parse_release(json: &str) -> Result<ReleaseInfo> {
 /// Возвращает ошибку при недоступности GitHub или битом ответе.
 pub fn latest_release() -> Result<Option<ReleaseInfo>> {
     let response = client()?
-        .get(API_LATEST)
+        .get(api_latest())
         .send()
         .context("не удалось спросить GitHub о последнем релизе")?;
     if response.status() == reqwest::StatusCode::NOT_FOUND {
@@ -197,7 +201,7 @@ fn sha256_file(path: &Path) -> Result<String> {
     let mut file =
         File::open(path).with_context(|| format!("не удалось открыть {}", path.display()))?;
     let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
+    let mut buffer = vec![0_u8; 64 * 1024];
     loop {
         let read = file
             .read(&mut buffer)
@@ -207,11 +211,11 @@ fn sha256_file(path: &Path) -> Result<String> {
         }
         hasher.update(&buffer[..read]);
     }
-    Ok(hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
+    let mut hex = String::with_capacity(SHA256_HEX_LEN);
+    for byte in hasher.finalize() {
+        let _ = write!(hex, "{byte:02x}");
+    }
+    Ok(hex)
 }
 
 /// Сравнивает версии: `true`, если `candidate` новее `current`.
@@ -226,11 +230,12 @@ pub fn version_is_newer(current: &str, candidate: &str) -> bool {
         std::cmp::Ordering::Less => return false,
         std::cmp::Ordering::Equal => {}
     }
-    match (current_pre, candidate_pre) {
-        (None, None) => false,
-        (None, Some(_)) => true,
-        (Some(_), None) => false,
+    match (current_pre.as_deref(), candidate_pre.as_deref()) {
         (Some(current_pre), Some(candidate_pre)) => candidate_pre > current_pre,
+        // Стабильный релиз новее своего пререлиза.
+        (Some(_), None) => true,
+        // Пререлиз стабильной версии — старее её.
+        (None, _) => false,
     }
 }
 
@@ -329,7 +334,7 @@ mod tests {
     fn sha256_of_file_matches_known_value() {
         let dir = tempfile::tempdir().expect("временный каталог");
         let path = dir.path().join("abc");
-        fs::write(&path, b"abc").expect("запись файла");
+        std::fs::write(&path, b"abc").expect("запись файла");
         assert_eq!(
             sha256_file(&path).expect("хеш файла"),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"

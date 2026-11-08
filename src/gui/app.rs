@@ -42,6 +42,16 @@ enum UpdateState {
     Ready(String),
 }
 
+/// Как пришла проверка обновлений: стартовая (тогда запускаем слушание)
+/// или ручная (тогда слушание не трогаем).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UpdateFlow {
+    /// Проверка при запуске приложения.
+    Startup,
+    /// Проверка по кнопке в шапке.
+    Manual,
+}
+
 /// Состояние окна настроек.
 #[derive(Default)]
 struct SettingsUi {
@@ -66,10 +76,8 @@ pub struct NeptuneApp {
     last_error: Option<String>,
     update: UpdateState,
     settings: SettingsUi,
-    /// Слушать начинаем только после первой (стартовой) проверки обновлений.
-    start_listening_after_check: bool,
-    /// Обновление установлено — нужно перезапустить приложение.
-    restart_pending: bool,
+    /// Как пришла текущая проверка обновлений.
+    update_flow: UpdateFlow,
 }
 
 impl NeptuneApp {
@@ -93,16 +101,15 @@ impl NeptuneApp {
             last_error: None,
             update: UpdateState::Checking,
             settings: SettingsUi::default(),
-            start_listening_after_check: true,
-            restart_pending: false,
+            update_flow: UpdateFlow::Startup,
         }
     }
 
     /// Закрывает вопрос обновления и запускает основной пайплайн.
     fn finish_update_check(&mut self) {
         self.update = UpdateState::Idle;
-        if self.start_listening_after_check {
-            self.start_listening_after_check = false;
+        if self.update_flow == UpdateFlow::Startup {
+            self.update_flow = UpdateFlow::Manual;
             self.send(UiCommand::SetListening(true));
         }
     }
@@ -155,10 +162,7 @@ impl NeptuneApp {
                     self.last_error = Some(format!("Не смогли проверить обновления: {message}"));
                     self.finish_update_check();
                 }
-                UiEvent::UpdateApplied(version) => {
-                    self.update = UpdateState::Ready(version);
-                    self.restart_pending = true;
-                }
+                UiEvent::UpdateApplied(version) => self.update = UpdateState::Ready(version),
                 UiEvent::UpdateFailed(message) => {
                     self.last_error = Some(format!("обновление: {message}"));
                     self.finish_update_check();
@@ -268,7 +272,7 @@ impl NeptuneApp {
                     if self.settings.saved {
                         ui.label(RichText::new("Сохранено").small());
                         if ui.small_button("🔄 перезапустить").clicked() {
-                            restart_app(ctx);
+                            let _ = restart_app(ctx);
                         }
                     }
                 });
@@ -294,6 +298,7 @@ impl NeptuneApp {
                     .clicked()
                 {
                     self.update = UpdateState::Checking;
+                    self.update_flow = UpdateFlow::Manual;
                     self.send(UiCommand::CheckUpdate);
                 }
                 if ui
@@ -495,11 +500,18 @@ fn copy_to_clipboard(text: &str) {
 }
 
 /// Запускает свежий exe (по тому же пути) и закрывает текущее окно.
-fn restart_app(ctx: &egui::Context) {
-    if let Ok(exe) = std::env::current_exe() {
-        let _ = std::process::Command::new(exe).spawn();
+///
+/// Возвращает `false`, если новый экземпляр запустить не удалось:
+/// тогда окно остаётся открытым, чтобы пользователь мог повторить вручную.
+fn restart_app(ctx: &egui::Context) -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    if std::process::Command::new(exe).spawn().is_err() {
+        return false;
     }
     ctx.send_viewport_cmd(ViewportCommand::Close);
+    true
 }
 
 impl eframe::App for NeptuneApp {
@@ -507,9 +519,8 @@ impl eframe::App for NeptuneApp {
         self.drain_events();
         let ctx = ui.ctx().clone();
 
-        if self.restart_pending {
-            self.restart_pending = false;
-            restart_app(&ctx);
+        // Обновление установлено — сразу запускаем новую версию.
+        if matches!(self.update, UpdateState::Ready(_)) && restart_app(&ctx) {
             return;
         }
 
