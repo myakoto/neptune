@@ -119,9 +119,7 @@ pub fn check() -> Result<Option<String>> {
     let Some(release) = latest_release()? else {
         return Ok(None);
     };
-    Ok(
-        version_is_newer(env!("CARGO_PKG_VERSION"), &release.version).then_some(release.version),
-    )
+    Ok(version_is_newer(env!("CARGO_PKG_VERSION"), &release.version).then_some(release.version))
 }
 
 /// Скачивает свежий релиз, сверяет контрольную сумму и подменяет бинарник.
@@ -142,9 +140,7 @@ pub fn apply() -> Result<String> {
         parse_sha256(&expected).with_context(|| format!("не удалось разобрать {ASSET_SHA256}"))?;
     let actual_hash = sha256_file(&exe_path)?;
     if !actual_hash.eq_ignore_ascii_case(&expected_hash) {
-        anyhow::bail!(
-            "контрольная сумма не совпала: ждали {expected_hash}, скачали {actual_hash}"
-        );
+        anyhow::bail!("контрольная сумма не совпала: ждали {expected_hash}, скачали {actual_hash}");
     }
 
     self_replace::self_replace(&exe_path).context("не удалось подменить бинарник")?;
@@ -162,8 +158,8 @@ fn download_to(http: &Client, url: &str, dest: &Path) -> Result<()> {
         .with_context(|| format!("не удалось скачать {url}"))?
         .error_for_status()
         .with_context(|| format!("сервер отклонил {url}"))?;
-    let mut file = File::create(dest)
-        .with_context(|| format!("не удалось создать {}", dest.display()))?;
+    let mut file =
+        File::create(dest).with_context(|| format!("не удалось создать {}", dest.display()))?;
     std::io::copy(&mut response, &mut file)
         .with_context(|| format!("не удалось записать {}", dest.display()))?;
     Ok(())
@@ -189,9 +185,7 @@ fn download_text(http: &Client, url: &str) -> Result<String> {
 /// Возвращает `None`, если хеша в тексте нет.
 fn parse_sha256(text: &str) -> Option<String> {
     text.split_whitespace()
-        .find(|token| {
-            token.len() == SHA256_HEX_LEN && token.chars().all(|c| c.is_ascii_hexdigit())
-        })
+        .find(|token| token.len() == SHA256_HEX_LEN && token.chars().all(|c| c.is_ascii_hexdigit()))
         .map(str::to_ascii_lowercase)
 }
 
@@ -200,8 +194,8 @@ fn parse_sha256(text: &str) -> Option<String> {
 /// # Errors
 /// Возвращает ошибку чтения файла.
 fn sha256_file(path: &Path) -> Result<String> {
-    let mut file = File::open(path)
-        .with_context(|| format!("не удалось открыть {}", path.display()))?;
+    let mut file =
+        File::open(path).with_context(|| format!("не удалось открыть {}", path.display()))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
@@ -317,7 +311,8 @@ mod tests {
 
     #[test]
     fn sha256_is_taken_from_first_token() {
-        let text = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  neptune.exe\n";
+        let text =
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  neptune.exe\n";
         assert_eq!(
             parse_sha256(text),
             Some("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".to_owned())
@@ -344,7 +339,10 @@ mod tests {
     #[test]
     fn core_comparison_pads_missing_parts() {
         assert_eq!(compare_core(&[0, 2], &[0, 2, 0]), std::cmp::Ordering::Equal);
-        assert_eq!(compare_core(&[0, 3], &[0, 2, 9]), std::cmp::Ordering::Greater);
+        assert_eq!(
+            compare_core(&[0, 3], &[0, 2, 9]),
+            std::cmp::Ordering::Greater
+        );
     }
 
     #[test]

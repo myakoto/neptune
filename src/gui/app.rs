@@ -194,7 +194,10 @@ impl NeptuneApp {
             }
             UpdateState::Ready(version) => {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("Версия {version} установлена, перезапускаю…")).small());
+                    ui.label(
+                        RichText::new(format!("Версия {version} установлена, перезапускаю…"))
+                            .small(),
+                    );
                     if ui.small_button("🔄 перезапустить сейчас").clicked() {
                         restart_app(ctx);
                     }
