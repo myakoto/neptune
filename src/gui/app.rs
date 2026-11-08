@@ -42,6 +42,16 @@ enum UpdateState {
     Ready(String),
 }
 
+/// Как пришла проверка обновлений: стартовая (тогда запускаем слушание)
+/// или ручная (тогда слушание не трогаем).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UpdateFlow {
+    /// Проверка при запуске приложения.
+    Startup,
+    /// Проверка по кнопке в шапке.
+    Manual,
+}
+
 /// Состояние окна настроек.
 #[derive(Default)]
 struct SettingsUi {
@@ -66,6 +76,8 @@ pub struct NeptuneApp {
     last_error: Option<String>,
     update: UpdateState,
     settings: SettingsUi,
+    /// Как пришла текущая проверка обновлений.
+    update_flow: UpdateFlow,
 }
 
 impl NeptuneApp {
@@ -89,13 +101,17 @@ impl NeptuneApp {
             last_error: None,
             update: UpdateState::Checking,
             settings: SettingsUi::default(),
+            update_flow: UpdateFlow::Startup,
         }
     }
 
     /// Закрывает вопрос обновления и запускает основной пайплайн.
     fn finish_update_check(&mut self) {
         self.update = UpdateState::Idle;
-        self.send(UiCommand::SetListening(true));
+        if self.update_flow == UpdateFlow::Startup {
+            self.update_flow = UpdateFlow::Manual;
+            self.send(UiCommand::SetListening(true));
+        }
     }
 
     fn drain_events(&mut self) {
@@ -182,8 +198,11 @@ impl NeptuneApp {
             }
             UpdateState::Ready(version) => {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("Версия {version} установлена")).small());
-                    if ui.small_button("🔄 перезапустить").clicked() {
+                    ui.label(
+                        RichText::new(format!("Версия {version} установлена, перезапускаю…"))
+                            .small(),
+                    );
+                    if ui.small_button("🔄 перезапустить сейчас").clicked() {
                         restart_app(ctx);
                     }
                 });
@@ -253,7 +272,7 @@ impl NeptuneApp {
                     if self.settings.saved {
                         ui.label(RichText::new("Сохранено").small());
                         if ui.small_button("🔄 перезапустить").clicked() {
-                            restart_app(ctx);
+                            let _ = restart_app(ctx);
                         }
                     }
                 });
@@ -273,6 +292,15 @@ impl NeptuneApp {
             ui.label(RichText::new("Neptune").strong());
             ui.label(RichText::new("EN ⇄ RU").weak());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui
+                    .selectable_label(false, "🔄")
+                    .on_hover_text("Проверить обновления")
+                    .clicked()
+                {
+                    self.update = UpdateState::Checking;
+                    self.update_flow = UpdateFlow::Manual;
+                    self.send(UiCommand::CheckUpdate);
+                }
                 if ui
                     .selectable_label(self.settings.open, "⚙")
                     .on_hover_text("Настройки (ключи API)")
@@ -472,17 +500,29 @@ fn copy_to_clipboard(text: &str) {
 }
 
 /// Запускает свежий exe (по тому же пути) и закрывает текущее окно.
-fn restart_app(ctx: &egui::Context) {
-    if let Ok(exe) = std::env::current_exe() {
-        let _ = std::process::Command::new(exe).spawn();
+///
+/// Возвращает `false`, если новый экземпляр запустить не удалось:
+/// тогда окно остаётся открытым, чтобы пользователь мог повторить вручную.
+fn restart_app(ctx: &egui::Context) -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    if std::process::Command::new(exe).spawn().is_err() {
+        return false;
     }
     ctx.send_viewport_cmd(ViewportCommand::Close);
+    true
 }
 
 impl eframe::App for NeptuneApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.drain_events();
         let ctx = ui.ctx().clone();
+
+        // Обновление установлено — сразу запускаем новую версию.
+        if matches!(self.update, UpdateState::Ready(_)) && restart_app(&ctx) {
+            return;
+        }
 
         Panel::top("header").show(ui, |ui| {
             self.header(&ctx, ui);

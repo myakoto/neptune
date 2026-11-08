@@ -64,7 +64,9 @@ pub fn parse_wav(bytes: &[u8]) -> Result<WavAudio, WavError> {
     let (sample_rate, channels) = format.ok_or(WavError::Truncated)?;
     let pcm = data.ok_or(WavError::Truncated)?;
     let samples = pcm
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| f32::from(i16::from_le_bytes([pair[0], pair[1]])) / f32::from(i16::MAX))
         .collect();
     Ok(WavAudio {

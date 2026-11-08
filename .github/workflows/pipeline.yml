@@ -67,15 +67,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Сборка release
         run: cargo build --release
-      - name: Упаковка артефакта
+      - name: Подготовка артефактов
         shell: pwsh
-        run: Compress-Archive -Path target/release/neptune.exe -DestinationPath neptune-x86_64-pc-windows-msvc.zip
+        run: |
+          Copy-Item target/release/neptune.exe neptune-x86_64-pc-windows-msvc.exe
+          Compress-Archive -Path target/release/neptune.exe -DestinationPath neptune-x86_64-pc-windows-msvc.zip
+          # Контрольная сумма бинарника: апдейтер сверяет её перед подменой.
+          $hash = (Get-FileHash neptune-x86_64-pc-windows-msvc.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  neptune-x86_64-pc-windows-msvc.exe" | Set-Content -Encoding ascii neptune-x86_64-pc-windows-msvc.exe.sha256
       - name: Тег и GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.version.outputs.value }}
           # тег создаётся на собранном коммите (если его ещё нет)
           target_commitish: ${{ github.sha }}
-          files: neptune-x86_64-pc-windows-msvc.zip
+          # exe + его .sha256 — для автообновления, zip — для ручной загрузки.
+          files: |
+            neptune-x86_64-pc-windows-msvc.exe
+            neptune-x86_64-pc-windows-msvc.exe.sha256
+            neptune-x86_64-pc-windows-msvc.zip
           prerelease: ${{ contains(needs.version.outputs.value, '-') }}
           generate_release_notes: true

@@ -117,6 +117,9 @@ pub async fn run(mut commands: mpsc::UnboundedReceiver<UiCommand>, events: Event
             UiCommand::ApplyUpdate => {
                 tokio::spawn(apply_update_task(events.clone()));
             }
+            UiCommand::CheckUpdate => {
+                tokio::spawn(check_update_task(events.clone()));
+            }
         }
     }
 }

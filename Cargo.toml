@@ -1,6 +1,6 @@
 ﻿[package]
 name = "neptune"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 description = "Live speech translator for calls: EN speech -> RU subtitles, RU speech -> EN text"
 license = "MIT"
@@ -14,10 +14,14 @@ dotenvy = "0.15.7"
 eframe = "0.35.0"
 # 0.3.33 сломан на crates.io: требует несуществующий futures-macro =0.3.33
 futures-util = "=0.3.32"
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "native-tls"] }
-self_update = { version = "0.44.0", features = ["archive-zip", "compression-zip-deflate"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "json", "native-tls"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+# Подмена собственного бинарника: Windows не даёт перезаписать запущенный exe,
+# поэтому старый переименовывается, новый копируется на его место.
+self-replace = "1.5.1"
+sha2 = "0.11.1"
+tempfile = "3.27.0"
 thiserror = "2.0.19"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
 tokio-tungstenite = { version = "0.30.0", features = ["native-tls"] }
