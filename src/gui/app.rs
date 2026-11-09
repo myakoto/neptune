@@ -311,17 +311,16 @@ impl NeptuneApp {
             );
             ui.add(egui::Label::new(RichText::new(&log_disp).small()).truncate());
             ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if ui.button("Открыть релиз").clicked() {
-                        show_release = true;
-                    }
-                    if ui.button("Копировать путь к логу").clicked() {
-                        copy_to_clipboard(&log_disp);
-                    }
-                    if ui.button("Закрыть").clicked() {
-                        show_error = false;
-                    }
-                });
+            ui.horizontal(|ui| {
+                if ui.button("Открыть релиз").clicked() {
+                    show_release = true;
+                }
+                if ui.button("Копировать путь к логу").clicked() {
+                    copy_to_clipboard(&log_disp);
+                }
+                if ui.button("Закрыть").clicked() {
+                    show_error = false;
+                }
             });
         if show_release {
             open_url("https://github.com/myakoto/neptune/releases/latest");
