@@ -106,9 +106,21 @@ pub fn latest_release() -> Result<Option<ReleaseInfo>> {
         .get(api_latest())
         .send()
         .context("не удалось спросить GitHub о последнем релизе")?;
-    if response.status() == reqwest::StatusCode::NOT_FOUND {
+
+    let status = response.status().as_u16();
+    if status == 404 {
         return Ok(None);
     }
+    if status != 200 {
+        let body_preview = response
+            .text()
+            .context("не удалось прочитать ответ GitHub")?;
+        let preview: String = body_preview.chars().take(200).collect();
+        anyhow::bail!(
+            "GitHub вернул статус {status}: {preview}",
+        );
+    }
+
     let body = response
         .text()
         .context("не удалось прочитать ответ GitHub")?;
