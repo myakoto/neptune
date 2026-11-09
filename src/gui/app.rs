@@ -292,16 +292,14 @@ impl NeptuneApp {
 
     /// Модальное окно с текстом ошибки обновления и путём к логу.
     fn update_error_window(&mut self, ctx: &egui::Context) {
-        if self.update_error.is_none() {
+        let Some(message) = self.update_error.clone() else {
             return;
-        }
-        let message = self.update_error.clone().unwrap_or_default();
+        };
         let log_disp = crate::update::log_path().display().to_string();
-        let mut open = true;
-        let mut copy = false;
-        let mut open_release = false;
+        let mut show_release = false;
+        let mut show_dialog = true;
         egui::Window::new("Обновление не удалось")
-            .open(&mut open)
+            .open(&mut show_dialog)
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
@@ -316,23 +314,20 @@ impl NeptuneApp {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     if ui.button("Открыть релиз").clicked() {
-                        open_release = true;
+                        show_release = true;
                     }
                     if ui.button("Копировать путь к логу").clicked() {
-                        copy = true;
+                        copy_to_clipboard(&log_disp);
                     }
                     if ui.button("Закрыть").clicked() {
-                        open = false;
+                        show_dialog = false;
                     }
                 });
             });
-        if copy {
-            copy_to_clipboard(&log_disp);
-        }
-        if open_release {
+        if show_release {
             open_url("https://github.com/myakoto/neptune/releases/latest");
         }
-        if !open {
+        if !show_dialog {
             self.update_error = None;
         }
     }
