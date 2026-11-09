@@ -164,8 +164,7 @@ pub fn log_update(msg: &str) {
     use std::io::Write;
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_secs());
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
