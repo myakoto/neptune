@@ -12,7 +12,7 @@
 use std::fmt::Write as _;
 use std::fs::File;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -149,6 +149,28 @@ pub fn apply() -> Result<String> {
 
     self_replace::self_replace(&exe_path).context("не удалось подменить бинарник")?;
     Ok(release.version)
+}
+
+/// Путь к логу обновлений (рядом с запущенным exe).
+pub fn log_path() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|dir| dir.join("update.log")))
+        .unwrap_or_else(|| std::env::temp_dir().join("neptune-update.log"))
+}
+
+/// Пишет строку с временной меткой в лог обновлений рядом с exe.
+pub fn log_update(msg: &str) {
+    use std::io::Write;
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if let Ok(mut file) =
+        std::fs::OpenOptions::new().create(true).append(true).open(log_path())
+    {
+        let _ = writeln!(file, "[{secs}] {msg}");
+    }
 }
 
 /// Скачивает файл в указанное место.

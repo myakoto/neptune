@@ -127,13 +127,28 @@ pub async fn run(mut commands: mpsc::UnboundedReceiver<UiCommand>, events: Event
 /// Стартовая проверка обновлений: не дольше 15 секунд, любой сбой —
 /// не помеха запуску (blocking-код — в отдельном треде).
 async fn check_update_task(events: EventSender) {
+    let current = env!("CARGO_PKG_VERSION");
+    crate::update::log_update(&format!("проверка: текущая версия {current}"));
     let check = tokio::task::spawn_blocking(crate::update::check);
     match tokio::time::timeout(UPDATE_CHECK_TIMEOUT, check).await {
-        Ok(Ok(Ok(Some(version)))) => events.send(UiEvent::UpdateAvailable(version)),
-        Ok(Ok(Ok(None))) => events.send(UiEvent::UpdateUpToDate),
-        Ok(Ok(Err(error))) => events.send(UiEvent::UpdateCheckFailed(error.to_string())),
-        Ok(Err(_)) => events.send(UiEvent::UpdateCheckFailed("проверка прервалась".into())),
+        Ok(Ok(Ok(Some(version)))) => {
+            crate::update::log_update(&format!("проверка: найдена новая {version}"));
+            events.send(UiEvent::UpdateAvailable(version));
+        }
+        Ok(Ok(Ok(None))) => {
+            crate::update::log_update("проверка: обновлений нет");
+            events.send(UiEvent::UpdateUpToDate);
+        }
+        Ok(Ok(Err(error))) => {
+            crate::update::log_update(&format!("проверка: ошибка: {error}"));
+            events.send(UiEvent::UpdateCheckFailed(error.to_string()));
+        }
+        Ok(Err(_)) => {
+            crate::update::log_update("проверка: прервалась");
+            events.send(UiEvent::UpdateCheckFailed("проверка прервалась".into()));
+        }
         Err(_) => {
+            crate::update::log_update("проверка: GitHub не ответил за 15 секунд");
             events.send(UiEvent::UpdateCheckFailed(
                 "GitHub не ответил за 15 секунд".into(),
             ));
@@ -143,10 +158,20 @@ async fn check_update_task(events: EventSender) {
 
 /// Скачивание и установка обновления по запросу из окна.
 async fn apply_update_task(events: EventSender) {
+    crate::update::log_update("обновление: начинаю");
     match tokio::task::spawn_blocking(crate::update::apply).await {
-        Ok(Ok(version)) => events.send(UiEvent::UpdateApplied(version)),
-        Ok(Err(error)) => events.send(UiEvent::UpdateFailed(error.to_string())),
-        Err(_) => events.send(UiEvent::UpdateFailed("обновление прервалось".into())),
+        Ok(Ok(version)) => {
+            crate::update::log_update(&format!("обновление: установлена {version}"));
+            events.send(UiEvent::UpdateApplied(version));
+        }
+        Ok(Err(error)) => {
+            crate::update::log_update(&format!("обновление: ошибка: {error}"));
+            events.send(UiEvent::UpdateFailed(error.to_string()));
+        }
+        Err(_) => {
+            crate::update::log_update("обновление: прервалось");
+            events.send(UiEvent::UpdateFailed("обновление прервалось".into()));
+        }
     }
 }
 

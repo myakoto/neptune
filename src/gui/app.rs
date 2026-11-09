@@ -74,6 +74,7 @@ pub struct NeptuneApp {
     history: VecDeque<PttEntry>,
     status: StatusSnapshot,
     last_error: Option<String>,
+    update_error: Option<String>,
     update: UpdateState,
     settings: SettingsUi,
     /// Как пришла текущая проверка обновлений.
@@ -99,6 +100,7 @@ impl NeptuneApp {
             history: VecDeque::new(),
             status: StatusSnapshot::default(),
             last_error: None,
+            update_error: None,
             update: UpdateState::Checking,
             settings: SettingsUi::default(),
             update_flow: UpdateFlow::Startup,
@@ -165,6 +167,7 @@ impl NeptuneApp {
                 UiEvent::UpdateApplied(version) => self.update = UpdateState::Ready(version),
                 UiEvent::UpdateFailed(message) => {
                     self.last_error = Some(format!("обновление: {message}"));
+                    self.update_error = Some(format!("обновление: {message}"));
                     self.finish_update_check();
                 }
             }
@@ -285,6 +288,49 @@ impl NeptuneApp {
                 }
             });
         self.settings.open = open;
+    }
+
+    /// Модальное окно с текстом ошибки обновления и путём к логу.
+    fn update_error_window(&mut self, ctx: &egui::Context) {
+        if self.update_error.is_none() {
+            return;
+        }
+        let message = self.update_error.clone().unwrap_or_default();
+        let log_disp = crate::update::log_path().display().to_string();
+        let mut open = true;
+        let mut copy = false;
+        let mut open_release = false;
+        egui::Window::new("Обновление не удалось")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.label(RichText::new(message).color(Color32::from_rgb(0xA3, 0x2D, 0x2D)));
+                ui.add_space(6.0);
+                ui.label(RichText::new("Подробности в логе рядом с приложением:").weak().small());
+                ui.add(egui::Label::new(RichText::new(&log_disp).small()).truncate());
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Открыть релиз").clicked() {
+                        open_release = true;
+                    }
+                    if ui.button("Копировать путь к логу").clicked() {
+                        copy = true;
+                    }
+                    if ui.button("Закрыть").clicked() {
+                        open = false;
+                    }
+                });
+            });
+        if copy {
+            copy_to_clipboard(&log_disp);
+        }
+        if open_release {
+            open_url("https://github.com/myakoto/neptune/releases/latest");
+        }
+        if !open {
+            self.update_error = None;
+        }
     }
 
     fn header(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -499,6 +545,24 @@ fn copy_to_clipboard(text: &str) {
     }
 }
 
+/// Открывает URL в браузере системы.
+fn open_url(url: &str) {
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(url).spawn();
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    }
+}
+
 /// Запускает свежий exe (по тому же пути) и закрывает текущее окно.
 ///
 /// Возвращает `false`, если новый экземпляр запустить не удалось:
@@ -543,5 +607,6 @@ impl eframe::App for NeptuneApp {
             self.subtitles_panel(ui);
         });
         self.settings_window(&ctx);
+        self.update_error_window(&ctx);
     }
 }
