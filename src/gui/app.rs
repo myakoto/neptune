@@ -297,20 +297,23 @@ impl NeptuneApp {
         };
         let log_disp = crate::update::log_path().display().to_string();
         let mut show_release = false;
-        let mut show_dialog = true;
+        let mut show_error = true;
         egui::Window::new("Обновление не удалось")
-            .open(&mut show_dialog)
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
-                ui.label(RichText::new(message).color(Color32::from_rgb(0xA3, 0x2D, 0x2D)));
+                ui.label(
+                    RichText::new(message).color(Color32::from_rgb(0xA3, 0x2D, 0x2D)),
+                );
                 ui.add_space(6.0);
                 ui.label(
                     RichText::new("Подробности в логе рядом с приложением:")
                         .weak()
                         .small(),
                 );
-                ui.add(egui::Label::new(RichText::new(&log_disp).small()).truncate());
+                ui.add(egui::Label::new(
+                    RichText::new(&log_disp).small(),
+                ).truncate());
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     if ui.button("Открыть релиз").clicked() {
@@ -320,14 +323,14 @@ impl NeptuneApp {
                         copy_to_clipboard(&log_disp);
                     }
                     if ui.button("Закрыть").clicked() {
-                        show_dialog = false;
+                        show_error = false;
                     }
                 });
             });
         if show_release {
             open_url("https://github.com/myakoto/neptune/releases/latest");
         }
-        if !show_dialog {
+        if !show_error {
             self.update_error = None;
         }
     }
