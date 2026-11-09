@@ -116,9 +116,7 @@ pub fn latest_release() -> Result<Option<ReleaseInfo>> {
             .text()
             .context("не удалось прочитать ответ GitHub")?;
         let preview: String = body_preview.chars().take(200).collect();
-        anyhow::bail!(
-            "GitHub вернул статус {status}: {preview}",
-        );
+        anyhow::bail!("GitHub вернул статус {status}: {preview}",);
     }
 
     let body = response
