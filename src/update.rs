@@ -166,8 +166,10 @@ pub fn log_update(msg: &str) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    if let Ok(mut file) =
-        std::fs::OpenOptions::new().create(true).append(true).open(log_path())
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path())
     {
         let _ = writeln!(file, "[{secs}] {msg}");
     }

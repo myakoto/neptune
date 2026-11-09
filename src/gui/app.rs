@@ -307,7 +307,11 @@ impl NeptuneApp {
             .show(ctx, |ui| {
                 ui.label(RichText::new(message).color(Color32::from_rgb(0xA3, 0x2D, 0x2D)));
                 ui.add_space(6.0);
-                ui.label(RichText::new("Подробности в логе рядом с приложением:").weak().small());
+                ui.label(
+                    RichText::new("Подробности в логе рядом с приложением:")
+                        .weak()
+                        .small(),
+                );
                 ui.add(egui::Label::new(RichText::new(&log_disp).small()).truncate());
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
