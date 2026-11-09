@@ -322,6 +322,7 @@ impl NeptuneApp {
                     show_error = false;
                 }
             });
+        });
         if show_release {
             open_url("https://github.com/myakoto/neptune/releases/latest");
         }
