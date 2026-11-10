@@ -59,6 +59,30 @@ pub struct ReleaseInfo {
     pub sha256_url: String,
 }
 
+/// Кэшированная информация о релизе (JSON + таймстамп) для fallback при rate-limit.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct ReleaseCache {
+    /// Версия без префикса `v`.
+    version: String,
+    /// URL бинарника.
+    exe_url: String,
+    /// URL контрольной суммы.
+    sha256_url: String,
+    /// Unix-timestamp момента получения.
+    fetched_at: u64,
+}
+
+impl ReleaseCache {
+    const TTL_SECS: u64 = 3_600; // 1 час
+
+    fn is_fresh(&self) -> bool {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs().saturating_sub(self.fetched_at) < Self::TTL_SECS)
+            .unwrap_or(false)
+    }
+}
+
 fn client() -> Result<Client> {
     Client::builder()
         .user_agent(USER_AGENT)
@@ -97,15 +121,146 @@ fn parse_release(json: &str) -> Result<ReleaseInfo> {
     })
 }
 
+/// Путь к файлу кэша релиза (рядом с exe, но с другим именем).
+pub fn cache_path() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|dir| dir.join("update-cache.json")))
+        .unwrap_or_else(|| std::env::temp_dir().join("neptune-update-cache.json"))
+}
+
+/// Загрузить кэш с диска.
+fn load_cache() -> Option<ReleaseCache> {
+    std::fs::read_to_string(cache_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .filter(|c| c.is_fresh())
+}
+
+/// Сохранить кэш на диск.
+fn save_cache(release: &ReleaseInfo) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let cache = ReleaseCache {
+        version: release.version.clone(),
+        exe_url: release.exe_url.clone(),
+        sha256_url: release.sha256_url.clone(),
+        fetched_at: now,
+    };
+    if let Ok(json) = serde_json::to_string_pretty(&cache) {
+        let _ = std::fs::write(cache_path(), json);
+    }
+}
+
+/// Альтернативный endpoint: atom feed — не ограничивается rate-limit как API.
+fn latest_release_rss() -> Result<Option<ReleaseInfo>> {
+    let http = Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()?;
+    let resp = http
+        .get(&format!(
+            "https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/latest.atom"
+        ))
+        .send()
+        .context("не удалось загрузить atom feed с GitHub")?;
+
+    if resp.status().as_u16() != 200 {
+        return Ok(None);
+    }
+
+    let body = resp
+        .text()
+        .context("не удалось прочитать body atom feed")?;
+
+    // Парсим XML вручную — достаём ссылки из тегов <link>
+    // Atom feed содержит ссылки вида:
+    // <link rel="alternate" href="https://github.com/myakoto/neptune/releases/tag/v0.2.3" />
+    let tag_name = extract_atom_tag(&body)?;
+    if tag_name.is_empty() {
+        return Ok(None);
+    }
+    // Извлекаем номер версии из URL tag/xxx
+    let version = tag_name
+        .strip_prefix(&format!(
+            "https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/tag/"
+        ))
+        .unwrap_or(&tag_name)
+        .to_owned();
+
+    let exe_url = format!(
+        "https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/download/{version}/{ASSET_EXE}"
+    );
+    let sha256_url = format!(
+        "https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/download/{version}/{ASSET_SHA256}"
+    );
+
+    Ok(Some(ReleaseInfo {
+        version,
+        exe_url,
+        sha256_url,
+    }))
+}
+
+/// Извлекает href из тегов <link> в atom feed.
+fn extract_atom_tag(xml: &str) -> Result<String> {
+    let link_start = xml.find("<link").ok_or_else(|| anyhow::anyhow!("нет тегов link в atom"))?;
+    let link_end = xml[link_start..].find(" />").unwrap_or_else(|| xml[link_start..].find("\"/>")?);
+    let link_content = &xml[link_start..][..=link_end];
+
+    // Ищем href="..."
+    let href_start = link_content.find("href=\"").ok_or_else(|| anyhow::anyhow!("нет href в link"))?;
+    let href_body = &link_content[href_start + 6..];
+    let href_end = href_body.find("\"").ok_or_else(|| anyhow::anyhow!("нет закрывающей кавычки href"))?;
+    Ok(href_body[..href_end].to_owned())
+}
+
 /// Свежий стабильный релиз; `None`, если релизов ещё нет.
 ///
 /// # Errors
 /// Возвращает ошибку при недоступности GitHub или битом ответе.
 pub fn latest_release() -> Result<Option<ReleaseInfo>> {
-    let response = client()?
-        .get(api_latest())
-        .send()
-        .context("не удалось спросить GitHub о последнем релизе")?;
+    // 1) Сначала пробуем кэш: не тратим запросы если свежий
+    if let Some(cache) = load_cache() {
+        return Ok(Some(ReleaseInfo {
+            version: cache.version,
+            exe_url: cache.exe_url,
+            sha256_url: cache.sha256_url,
+        }));
+    }
+
+    // 2) Основной путь: REST API
+    if let Ok(Some(release)) = latest_release_api() {
+        save_cache(&release);
+        return Ok(Some(release));
+    }
+
+    // 3) Fallback: atom feed
+    if let Ok(Some(release)) = latest_release_rss() {
+        save_cache(&release);
+        return Ok(Some(release));
+    }
+
+    // 4) Если ничего не получилось — вернуть кэш несмотря на просрочку
+    if let Some(cache) = load_cache() {
+        log_update("fallback: использован просроченный кэш");
+        return Ok(Some(ReleaseInfo {
+            version: cache.version,
+            exe_url: cache.exe_url,
+            sha256_url: cache.sha256_url,
+        }));
+    }
+
+    log_update("fallback: кэш отсутствует, нет релиза");
+    Ok(None)
+}
+
+/// Запрос к GitHub REST API с проверкой статуса и текстом ошибки.
+fn latest_release_api() -> Result<Option<ReleaseInfo>> {
+    let response = client()?.get(api_latest()).send().context(
+        "не удалось спросить GitHub о последнем релизе",
+    )?;
 
     let status = response.status().as_u16();
     if status == 404 {
@@ -115,8 +270,9 @@ pub fn latest_release() -> Result<Option<ReleaseInfo>> {
         let body_preview = response
             .text()
             .context("не удалось прочитать ответ GitHub")?;
-        let preview: String = body_preview.chars().take(200).collect();
-        anyhow::bail!("GitHub вернул статус {status}: {preview}");
+        anyhow::bail!(
+            "GitHub API вернул статус {status}: {body_preview}",
+        );
     }
 
     let body = response
